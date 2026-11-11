@@ -20,7 +20,11 @@ Push these files to a repository, then in the repository choose Settings → Pag
 1. Create a Supabase project and run `supabase/schema.sql` in its SQL editor.
 2. Put the project URL and publishable key in `config.js`.
 
-With `config.js` left empty the app saves plays on the device only. Sharing by link, image, PDF and video works either way.
+With `config.js` left empty the app is a scratchboard that saves plays on the device only. Sharing by link, image, PDF and video works either way.
+
+## Playbooks and roles
+
+Signed-in users create playbooks and add people by username or email. Roles: Owner (full control), Admin (edit plays and manage people), Editor (create and edit plays), Viewer (view only). An email with no account yet becomes an invite that is applied when that person signs up.
 
 ## Files
 

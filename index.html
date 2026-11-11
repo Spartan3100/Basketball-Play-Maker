@@ -15,19 +15,21 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div id="app" data-side="bottom">
+<main id="screen"></main>
+<div id="app" data-side="bottom" hidden>
   <header class="bar">
-    <span class="brand">Timeout</span>
+    <button type="button" class="btn" data-act="back">‹ Back</button>
     <input id="playName" aria-label="Play name" autocomplete="off" maxlength="60">
-    <button type="button" class="btn" data-act="book">Playbook</button>
+    <span class="pill" id="pbLabel" hidden></span>
+    <button type="button" class="btn" id="btnAdd" data-act="addToPb">Add to playbook</button>
     <button type="button" class="btn primary" data-act="share">Share</button>
     <button type="button" class="btn icon" data-act="settings" aria-label="Settings" title="Settings">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-2.8 1.2V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-2.9-1.2l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00-1.2-2.8H3a2 2 0 110-4h.1a1.7 1.7 0 001.2-2.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 002.8-1.2V3a2 2 0 114 0v.1a1.7 1.7 0 002.9 1.2l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 001.2 2.8h.1a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1.1z"/></svg>
     </button>
   </header>
   <div class="banner" id="banner" hidden>
-    <span>This play was shared with you.</span>
-    <button type="button" class="btn primary" data-act="saveCopy">Save to my playbook</button>
+    <span id="bannerText"></span>
+    <button type="button" class="btn primary" id="bannerBtn" data-act="saveCopy">Save a copy</button>
   </div>
   <div class="cbar">
     <div class="seg" id="segView">

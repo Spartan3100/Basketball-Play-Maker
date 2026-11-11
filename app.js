@@ -53,28 +53,35 @@ function normalize(p) {
   return p;
 }
 
-let book = LS.get('timeout.plays', null);       // every play, plus {id, deleted:true} tombstones for sync
+let book = LS.get('timeout.plays', null);       // scratch plays kept on this device
 if (!Array.isArray(book)) book = [examplePlay()];
-book = book.map(p => (p.deleted ? p : normalize(p))).filter(Boolean);
-const livePlays = () => book.filter(p => !p.deleted).sort((a, b) => b.updatedAt - a.updatedAt);
+book = book.filter(p => !p.deleted).map(normalize).filter(Boolean);
+const livePlays = () => book.slice().sort((a, b) => b.updatedAt - a.updatedAt);
 function saveBook() { LS.set('timeout.plays', book); }
 
-let play, owned = true;                         // the play on screen; owned = it lives in the playbook
-const st = { tool: 'move', cur: 0, showEnd: false, defense: true, filter: 'All' };
+// The play on screen, and where it lives: a scratch play on this device, a play in a cloud playbook, or one opened from a shared link.
+let play, where = { kind: 'draft' };
+const st = { tool: 'move', cur: 0, showEnd: false, defense: true };
 let undo = [], redo = [];
 
 function save() {
   play.updatedAt = Date.now();
-  if (!owned) return;
-  const i = book.findIndex(p => p.id === play.id); if (i >= 0) book[i] = play; else book.push(play);
-  saveBook(); LS.set('timeout.last', play.id); scheduleSync();
+  if (where.kind === 'draft') { const i = book.findIndex(p => p.id === play.id); if (i >= 0) book[i] = play; else book.push(play); saveBook(); }
+  else if (where.kind === 'cloud' && canEdit(where.pb)) queueCloudSave(play, where.pb.id);
 }
-function loadPlay(p, isOwned = true) {
-  stopAnim(); play = p; owned = isOwned; st.cur = 0; st.showEnd = false; undo = []; redo = [];
+function setEditorChrome() {
+  const viewOnly = where.kind === 'cloud' && !canEdit(where.pb);
+  $('banner').hidden = !(where.kind === 'shared' || viewOnly);
+  $('bannerText').textContent = viewOnly ? 'View only. Changes you make here are not saved.' : 'This play was shared with you.';
+  $('bannerBtn').hidden = viewOnly;
+  $('btnAdd').hidden = where.kind !== 'draft' || !cloudOn;
+  $('pbLabel').hidden = where.kind !== 'cloud'; $('pbLabel').textContent = where.kind === 'cloud' ? where.pb.name : '';
+}
+function loadPlay(p, w) {
+  stopAnim(); play = p; where = w || { kind: 'draft' }; st.cur = 0; st.showEnd = false; undo = []; redo = [];
   $('playName').value = play.name; $('level').value = play.court.level; $('tag').value = play.tag;
-  press($('segView'), 'view', play.court.view); $('banner').hidden = owned;
-  if (owned) LS.set('timeout.last', play.id);
-  renderSteps(); renderTools(); layout();
+  press($('segView'), 'view', play.court.view); setEditorChrome();
+  renderSteps(); renderTools(); showEditor();
 }
 
 /* ================= editing with undo and step-to-step carry-over ================= */
@@ -265,21 +272,8 @@ function settingsSheet() {
     group('Drawing feel', 'feel', [['clean', 'Clean lines'], ['marker', 'Dry-erase marker']]) +
     group('Player markers', 'markers', [['discs', 'Numbered discs'], ['chalk', "Coach's O and X"], ['pos', 'Positions (PG, SG…)']]) +
     group('Animation speed', 'speed', [['slow', 'Slow'], ['normal', 'Normal'], ['fast', 'Fast']]) +
-    '<h3>Account</h3><div class="btns"><button type="button" class="btn" data-act="account">' + (user ? 'Signed in · manage' : 'Sign in to sync') + '</button></div>' +
+    '<h3>Account</h3><div class="btns"><button type="button" class="btn" data-act="account">' + (user ? 'Account' : 'Sign in') + '</button></div>' +
     '<p class="note">To install Timeout as an app, open your browser menu and choose “Add to Home Screen” or “Install”.</p>');
-}
-
-function bookSheet() {
-  const plays = livePlays().filter(p => st.filter === 'All' || p.tag === st.filter);
-  sheet(head('Playbook') +
-    '<div class="btns"><button type="button" class="btn primary" data-act="newPlay">New play</button>' +
-    '<button type="button" class="btn" data-act="printAll">Print playbook</button>' +
-    '<button type="button" class="btn" data-act="account">' + (user ? 'Synced' : 'Sign in to sync') + '</button></div>' +
-    '<div class="opts">' + ['All'].concat(TAGS).map(t => '<button type="button" class="opt" data-act="filter" data-v="' + t + '" aria-pressed="' + (st.filter === t) + '">' + t + '</button>').join('') + '</div>' +
-    (plays.length ? plays.map(p => '<div class="row"><button type="button" class="main" data-act="open" data-id="' + p.id + '"><b>' + esc(p.name) + '</b><span>' + esc(p.tag) + ' · ' + p.steps.length + (p.steps.length === 1 ? ' step' : ' steps') + '</span></button>' +
-      '<button type="button" class="btn" data-act="dup" data-id="' + p.id + '">Copy</button><button type="button" class="btn danger" data-act="askDel" data-id="' + p.id + '">Delete</button></div>').join('')
-      : '<p class="note">No plays in this folder yet. Press “New play” to start one.</p>') +
-    '<p class="note">' + (user ? 'Your plays sync to your account.' : 'Your plays are saved on this device.') + '</p>');
 }
 
 function shareSheet() {
@@ -324,7 +318,7 @@ async function openFromHash() {
     if (h[1] === 'p') data = await unpack(h.slice(3));
     else { const c = await cloud(); if (!c) throw new Error('no cloud'); const r = await c.rpc('timeout_get_share', { share_id: h.slice(3) }); if (r.error || !r.data) throw new Error('missing'); data = r.data; }
     const p = normalize(data); if (!p) throw new Error('bad');
-    p.id = uuid(); loadPlay(p, false); return true;
+    p.id = uuid(); loadPlay(p, { kind: 'shared' }); return true;
   } catch { toast('That shared link could not be opened. It may be incomplete.'); return false; }
 }
 
@@ -381,61 +375,157 @@ async function printPlays(list) {
   closeSheet(); window.print();
 }
 
-/* ================= cloud sync (Supabase) ================= */
-let sb = null, user = null, syncT = null, syncing = false;
+/* ================= cloud: accounts, playbooks, people ================= */
+let sb = null, user = null, cloudP = null;
 const cloudOn = !!(CFG.supabaseUrl && CFG.supabaseKey);
+const ROLES = {
+  owner: ['Owner', 'Full control of the playbook'], admin: ['Admin', 'Edit plays and manage people'],
+  editor: ['Editor', 'Create and edit plays'], viewer: ['Viewer', 'View plays only'],
+};
+function canEdit(pb) { return pb.role !== 'viewer'; }
+function canManage(pb) { return pb.role === 'owner' || pb.role === 'admin'; }
+const kept = LS.get('timeout.cache', { pbs: [], plays: {} });   // last copy from the cloud, for opening offline
+const pendingSaves = LS.get('timeout.pending', {});             // play id -> row waiting to be sent
 function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); }); }
-async function cloud() {
-  if (!cloudOn) return null;
-  if (!sb) {
+function cloud() {
+  if (!cloudOn) return Promise.resolve(null);
+  if (!cloudP) cloudP = (async () => {
     if (!window.supabase) await loadScript('vendor/supabase.js');
-    sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey);
-    const { data } = await sb.auth.getSession(); user = data.session ? data.session.user : null;
-    sb.auth.onAuthStateChange((_e, s) => { const was = user && user.id; user = s ? s.user : null; if (user && user.id !== was) scheduleSync(100); });
-  }
-  return sb;
+    const c = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey);
+    const { data } = await c.auth.getSession(); user = data.session ? data.session.user : null;
+    c.auth.onAuthStateChange((_e, s) => { user = s ? s.user : null; });
+    sb = c; return c;
+  })().catch(e => { cloudP = null; throw e; });
+  return cloudP;
 }
-function scheduleSync(ms = 2500) { if (!cloudOn || !user) return; clearTimeout(syncT); syncT = setTimeout(sync, ms); }
-async function sync() {
-  if (!sb || !user || syncing || !navigator.onLine) return;
-  syncing = true;
-  try {
-    const { data: rows, error } = await sb.from('timeout_plays').select('id,data,rev,deleted');
-    if (error) throw error;
-    const remote = new Map(rows.map(r => [r.id, r]));
-    for (const r of rows) {
-      const i = book.findIndex(p => p.id === r.id), local = book[i];
-      if (local && local.updatedAt >= r.rev) continue;
-      const next = r.deleted ? { id: r.id, deleted: true, updatedAt: r.rev } : normalize(Object.assign({}, r.data, { id: r.id, updatedAt: r.rev }));
-      if (!next) continue;
-      if (i >= 0) book[i] = next; else book.push(next);
-      if (play && owned && play.id === r.id && !drag && !draft) { if (r.deleted) loadPlay(livePlays()[0] || adopt(newPlay())); else loadPlay(next); }
-    }
-    const up = book.filter(p => !remote.has(p.id) || p.updatedAt > remote.get(p.id).rev)
-      .map(p => ({ id: p.id, data: p.deleted ? {} : p, rev: p.updatedAt, deleted: !!p.deleted }));
-    if (up.length) { const r = await sb.from('timeout_plays').upsert(up); if (r.error) throw r.error; }
-    saveBook();
-  } catch (e) { console.warn('Sync failed', e); toast('Could not sync right now. Your plays are still saved on this device.'); }
-  syncing = false;
+let saveT = null, saveWarned = false;
+function queueCloudSave(p, pbId) {
+  pendingSaves[p.id] = { id: p.id, playbook_id: pbId, data: p, rev: p.updatedAt }; LS.set('timeout.pending', pendingSaves);
+  clearTimeout(saveT); saveT = setTimeout(flushSaves, 1200);
 }
-function adopt(p) { book.push(p); saveBook(); return p; }
+async function flushSaves() {
+  clearTimeout(saveT);
+  const rows = Object.values(pendingSaves); if (!rows.length || !sb || !user || !navigator.onLine) return;
+  const { error } = await sb.from('timeout_plays').upsert(rows);
+  if (error) { if (!saveWarned) toast('Could not save to the playbook right now. Your changes are kept on this device and will be sent later.'); saveWarned = true; return; }
+  saveWarned = false; rows.forEach(r => { if (pendingSaves[r.id] && pendingSaves[r.id].rev === r.rev) delete pendingSaves[r.id]; }); LS.set('timeout.pending', pendingSaves);
+}
+async function fetchPlaybooks() {
+  const [a, b] = await Promise.all([sb.from('timeout_playbooks').select('id,name,owner_id').order('name'), sb.from('timeout_playbook_members').select('playbook_id,role').eq('user_id', user.id)]);
+  if (a.error) throw a.error;
+  const roles = new Map((b.data || []).map(m => [m.playbook_id, m.role]));
+  kept.pbs = a.data.map(p => ({ id: p.id, name: p.name, role: p.owner_id === user.id ? 'owner' : (roles.get(p.id) || 'viewer') }));
+  LS.set('timeout.cache', kept); return kept.pbs;
+}
+async function fetchPlays(pbId) {
+  const { data, error } = await sb.from('timeout_plays').select('id,data,rev').eq('playbook_id', pbId);
+  if (error) throw error;
+  const list = data.map(r => normalize(Object.assign({}, r.data, { id: r.id, updatedAt: r.rev }))).filter(Boolean);
+  Object.values(pendingSaves).forEach(r => { if (r.playbook_id !== pbId) return; const i = list.findIndex(p => p.id === r.id); if (i >= 0) list[i] = r.data; else list.push(r.data); });
+  list.sort((x, y) => x.name.localeCompare(y.name));
+  kept.plays[pbId] = list; LS.set('timeout.cache', kept); return list;
+}
 
-function accountSheet(msg) {
-  if (!cloudOn) { sheet(head('Account') + '<p class="note">Cloud sync is not switched on for this copy of Timeout yet. Your plays are saved on this device, and you can still share them by link, image, PDF or video.</p>'); return; }
-  if (user) { sheet(head('Account') + '<p class="note">Signed in as ' + esc(user.email) + '. Your playbook syncs to every device where you sign in.</p><div class="btns"><button type="button" class="btn primary" data-act="syncNow">Sync now</button><button type="button" class="btn" data-act="signOut">Sign out</button></div>'); return; }
-  sheet(head('Sign in') + '<form data-form="auth" class="field" style="gap:10px">' +
-    '<label class="field">Email<input id="authEmail" type="email" required autocomplete="email" autofocus></label>' +
+/* ================= screens: sign in, home, playbook ================= */
+let view = { name: 'auth' };
+function showScreen(html) { stopAnim(); $('app').hidden = true; const s = $('screen'); s.innerHTML = html; s.hidden = false; }
+function showEditor() { $('screen').hidden = true; $('app').hidden = false; layout(); }
+const GEAR = '<button type="button" class="btn icon" data-act="settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>';
+const playRow = (p, open, extra) => '<div class="row"><button type="button" class="main" data-act="' + open + '" data-id="' + p.id + '"><b>' + esc(p.name) + '</b><span>' + esc(p.tag) + ' · ' + p.steps.length + (p.steps.length === 1 ? ' step' : ' steps') + '</span></button>' + extra + '</div>';
+
+function renderAuth(msg) {
+  view = { name: 'auth' };
+  showScreen('<div class="hero"><div class="brand big">Timeout</div><p class="tagline">Basketball play designer</p>' +
+    '<form data-form="auth" class="card">' +
+    '<label class="field">Email<input id="authEmail" type="email" required autocomplete="email"></label>' +
     '<label class="field">Password<input id="authPass" type="password" required minlength="8" autocomplete="current-password"></label>' +
     (msg ? '<p class="' + (msg.ok ? 'note' : 'err') + '">' + esc(msg.text) + '</p>' : '') +
     '<div class="btns"><button class="btn primary" type="submit" data-mode="in">Sign in</button><button class="btn" type="submit" data-mode="up">Create account</button></div>' +
-    '<p class="note">Passwords need at least 8 characters.</p></form>');
+    '<p class="note">New passwords need at least 8 characters.</p></form>' +
+    '<button type="button" class="btn ghost" data-act="guest">Continue without signing in</button>' +
+    '<p class="note">Without an account you can use the scratchboard on this device. Playbooks and adding people need an account.</p></div>');
+}
+function renderHome(pbs, loading) {
+  const drafts = livePlays();
+  let books;
+  if (!cloudOn) books = '';
+  else if (!user) books = '<h3>Playbooks</h3><p class="note">Sign in to create playbooks and share them with your staff and players.</p><div class="btns"><button type="button" class="btn primary" data-act="account">Sign in</button></div>';
+  else books = '<h3>Playbooks</h3>' + (pbs.length ? pbs.map(b => '<div class="row"><button type="button" class="main" data-act="openPb" data-id="' + b.id + '"><b>' + esc(b.name) + '</b><span>' + ROLES[b.role][1] + '</span></button><span class="pill">' + ROLES[b.role][0] + '</span></div>').join('')
+    : '<p class="note">' + (loading ? 'Loading your playbooks…' : 'You have no playbooks yet. Create one to save plays and add people.') + '</p>') +
+    '<div class="btns"><button type="button" class="btn" data-act="newPb">New playbook</button></div>';
+  showScreen('<header class="bar"><span class="brand">Timeout</span><span class="sp"></span>' + (cloudOn ? '<button type="button" class="btn" data-act="account">' + (user ? 'Account' : 'Sign in') + '</button>' : '') + GEAR + '</header><div class="wrap">' +
+    '<button type="button" class="card big" data-act="scratch"><b>Scratchboard</b><span>Open a blank court and start drawing.</span></button>' + books +
+    (drafts.length ? '<h3>Scratch plays on this device</h3>' + drafts.map(p => playRow(p, 'openDraft', '<button type="button" class="btn danger" data-act="askDelDraft" data-id="' + p.id + '">Delete</button>')).join('') : '') + '</div>');
+}
+async function goHome() {
+  view = { name: 'home', pbs: user ? kept.pbs : [] }; renderHome(view.pbs, !!user);
+  if (!user || !sb) return;
+  try { const pbs = await fetchPlaybooks(); if (view.name === 'home') { view.pbs = pbs; renderHome(pbs); } }
+  catch { if (view.name === 'home') { renderHome(view.pbs); toast('You seem to be offline. Showing the last saved copy.'); } }
+}
+function renderPb(pb, plays) {
+  const ed = canEdit(pb), owner = pb.role === 'owner';
+  showScreen('<header class="bar"><button type="button" class="btn" data-act="home">‹ Home</button><b class="title">' + esc(pb.name) + '</b><span class="pill">' + ROLES[pb.role][0] + '</span></header><div class="wrap">' +
+    '<div class="btns">' + (ed ? '<button type="button" class="btn primary" data-act="newCloudPlay">New play</button>' : '') +
+    '<button type="button" class="btn" data-act="people">People</button><button type="button" class="btn" data-act="printPb">Print playbook</button>' +
+    (owner ? '<button type="button" class="btn" data-act="renamePb">Rename</button><button type="button" class="btn danger" data-act="askDelPb">Delete playbook</button>' : '<button type="button" class="btn danger" data-act="askLeavePb">Leave</button>') + '</div>' +
+    (plays === null ? '<p class="note">Loading plays…</p>' : plays.length ? plays.map(p => playRow(p, 'openCloud', ed ? '<button type="button" class="btn" data-act="dupCloud" data-id="' + p.id + '">Copy</button><button type="button" class="btn danger" data-act="askDelCloud" data-id="' + p.id + '">Delete</button>' : '')).join('')
+      : '<p class="note">' + (ed ? 'No plays here yet. Press “New play”, or add one from the scratchboard.' : 'No plays in this playbook yet.') + '</p>') + '</div>');
+}
+async function openPb(pb) {
+  view = { name: 'pb', pb, plays: kept.plays[pb.id] || null }; renderPb(pb, view.plays);
+  try { await flushSaves(); const plays = await fetchPlays(pb.id); if (view.name === 'pb' && view.pb.id === pb.id) { view.plays = plays; renderPb(pb, plays); } }
+  catch { if (view.name === 'pb' && view.pb.id === pb.id) { view.plays = view.plays || []; renderPb(pb, view.plays); toast('You seem to be offline. Showing the last saved copy.'); } }
+}
+async function afterSignIn() {
+  try { const r = await sb.rpc('timeout_accept_invites'); if (r.data > 0) toast('You were added to ' + r.data + (r.data === 1 ? ' playbook.' : ' playbooks.')); } catch { /* offline */ }
+  flushSaves(); goHome();
+}
+
+const roleSelect = (cur, attrs) => '<select ' + attrs + ' aria-label="Role">' + ['admin', 'editor', 'viewer'].map(r => '<option value="' + r + '"' + (r === cur ? ' selected' : '') + '>' + ROLES[r][0] + '</option>').join('') + '</select>';
+async function peopleSheet(msg) {
+  const pb = view.pb, manage = canManage(pb);
+  sheet(head('People') + '<p class="note">Loading…</p>');
+  const [pp, inv] = await Promise.all([sb.rpc('timeout_playbook_people', { pb: pb.id }), manage ? sb.from('timeout_invites').select('email,role').eq('playbook_id', pb.id) : Promise.resolve({ data: [] })]);
+  if (pp.error) { sheet(head('People') + '<p class="err">Could not load the people on this playbook. Check your connection and try again.</p>'); return; }
+  const people = pp.data.map(p => '<div class="row"><span class="main"><b>' + esc(p.display_name || p.username || 'Unnamed') + (p.user_id === user.id ? ' (you)' : '') + '</b><span>' + (p.username ? '@' + esc(p.username) : '') + '</span></span>' +
+    (p.role === 'owner' || !manage || p.user_id === user.id ? '<span class="pill">' + ROLES[p.role][0] + '</span>'
+      : roleSelect(p.role, 'data-change="role" data-id="' + p.user_id + '"') + '<button type="button" class="btn danger" data-act="rmPerson" data-id="' + p.user_id + '">Remove</button>') + '</div>').join('');
+  const invites = (inv.data || []).map(i => '<div class="row"><span class="main"><b>' + esc(i.email) + '</b><span>Invited. Joins when they create an account.</span></span>' +
+    roleSelect(i.role, 'data-change="inviteRole" data-id="' + esc(i.email) + '"') + '<button type="button" class="btn danger" data-act="rmInvite" data-id="' + esc(i.email) + '">Remove</button></div>').join('');
+  sheet(head('People') + '<p class="note">' + esc(pb.name) + '</p>' + people + invites +
+    (manage ? '<h3>Add a person</h3><form data-form="person" class="field" style="gap:10px">' +
+      '<label class="field">Their username or email<input id="personWho" required autocomplete="off" autocapitalize="none"></label>' +
+      '<label class="field">Role' + roleSelect('viewer', 'id="personRole"') + '</label>' +
+      (msg ? '<p class="' + (msg.ok ? 'note' : 'err') + '">' + esc(msg.text) + '</p>' : '') +
+      '<div class="btns"><button class="btn primary" type="submit">Add person</button></div></form>' +
+      '<h3>What each role can do</h3>' + ['admin', 'editor', 'viewer'].map(r => '<p class="note"><b>' + ROLES[r][0] + ':</b> ' + ROLES[r][1] + '</p>').join('')
+      : '<p class="note">Only the owner and admins can add or remove people.</p>'));
+}
+function nameSheet(title, value, mode) {
+  sheet(head(title) + '<form data-form="pb" data-mode="' + mode + '" class="field" style="gap:10px"><label class="field">Playbook name<input id="pbName" required maxlength="60" autofocus autocomplete="off" value="' + esc(value) + '" placeholder="e.g. Varsity 2026"></label>' +
+    '<div class="btns"><button class="btn primary" type="submit">' + (mode === 'rename' ? 'Save' : 'Create playbook') + '</button></div></form>');
+}
+const confirmSheet = (title, text, act, label, id) => sheet('<h2>' + title + '</h2><p class="note">' + text + '</p><div class="btns"><button type="button" class="btn danger" data-act="' + act + '" data-id="' + (id || '') + '">' + label + '</button><button type="button" class="btn" data-act="close">Cancel</button></div>');
+async function addPlayTo(pb) {
+  const p = play, row = { id: p.id, playbook_id: pb.id, data: p, rev: Date.now() };
+  const { error } = await sb.from('timeout_plays').upsert(row);
+  if (error) { toast('Could not add the play. Check your connection and try again.'); return; }
+  book = book.filter(x => x.id !== p.id); saveBook();
+  if (play === p) { where = { kind: 'cloud', pb }; setEditorChrome(); }
+  closeSheet(); toast('Added to ' + pb.name + '.');
+}
+async function pickPlaybookSheet() {
+  sheet(head('Add to playbook') + '<p class="note">Loading your playbooks…</p>');
+  let pbs; try { pbs = (await fetchPlaybooks()).filter(canEdit); } catch { sheet(head('Add to playbook') + '<p class="err">Could not load your playbooks. Check your connection and try again.</p>'); return; }
+  view.pick = pbs;
+  sheet(head('Add to playbook') + (pbs.length ? '<p class="note">Choose where to save “' + esc(play.name) + '”.</p>' + pbs.map(b => '<button type="button" class="row" data-act="pickPb" data-id="' + b.id + '"><span class="main"><b>' + esc(b.name) + '</b><span>' + ROLES[b.role][0] + '</span></span></button>').join('')
+    : '<p class="note">You do not have a playbook you can edit yet.</p>') + '<div class="btns"><button type="button" class="btn" data-act="newPbForPlay">New playbook</button></div>');
 }
 
 /* ================= actions ================= */
 const actions = {
-  close: closeSheet,
-  book: bookSheet, share: shareSheet, settings: settingsSheet,
-  account() { cloud().then(() => accountSheet()).catch(() => { toast('Could not reach the sync service. Check your connection.'); }); },
+  close: closeSheet, share: shareSheet, settings: settingsSheet,
   play() { if (anim) { stopAnim(); render(); } else playAnim(); },
   addStep() {
     stopAnim(); st.showEnd = false; undo.push(JSON.stringify(play.steps)); redo = [];
@@ -445,27 +535,62 @@ const actions = {
     toast('Step ' + (st.cur + 1) + ' starts where step ' + st.cur + ' ended. Draw the next action.');
   },
   delStep() { if (play.steps.length < 2) return; stopAnim(); undo.push(JSON.stringify(play.steps)); redo = []; play.steps.splice(st.cur, 1); st.cur = Math.min(st.cur, play.steps.length - 1); save(); renderSteps(); renderTools(); render(); },
-  set(el) {
-    settings[el.dataset.k] = el.dataset.v; LS.set('timeout.settings', settings);
-    press(el.parentElement, 'v', el.dataset.v); $('app').dataset.side = settings.side; layout();
+  set(el) { settings[el.dataset.k] = el.dataset.v; LS.set('timeout.settings', settings); press(el.parentElement, 'v', el.dataset.v); $('app').dataset.side = settings.side; layout(); },
+
+  // moving between screens
+  home() { closeSheet(); goHome(); },
+  back() { closeSheet(); if (where.kind === 'shared') history.replaceState(null, '', baseUrl()); if (where.kind === 'cloud') openPb(where.pb); else goHome(); },
+  guest() { LS.set('timeout.guest', 1); goHome(); },
+  account() {
+    closeSheet();
+    if (!user) { renderAuth(); return; }
+    sheet(head('Account') + '<p class="note">Signed in as ' + esc(user.email) + '.</p><div class="btns"><button type="button" class="btn" data-act="signOut">Sign out</button></div>');
   },
-  filter(el) { st.filter = el.dataset.v; bookSheet(); },
-  newPlay() { const p = adopt(newPlay()); closeSheet(); loadPlay(p); scheduleSync(); $('playName').select(); },
-  open(el) { const p = book.find(x => x.id === el.dataset.id); if (p) { closeSheet(); loadPlay(p); } },
-  dup(el) { const p = book.find(x => x.id === el.dataset.id); if (!p) return; const c = clone(p); c.id = uuid(); c.name = (p.name + ' copy').slice(0, 60); c.updatedAt = Date.now(); adopt(c); scheduleSync(); bookSheet(); },
-  askDel(el) {
-    const p = book.find(x => x.id === el.dataset.id); if (!p) return;
-    sheet('<h2>Delete this play?</h2><p class="note">“' + esc(p.name) + '” will be removed from your playbook' + (user ? ' on every device' : '') + '. This cannot be undone.</p>' +
-      '<div class="btns"><button type="button" class="btn danger" data-act="del" data-id="' + p.id + '">Delete play</button><button type="button" class="btn" data-act="book">Keep it</button></div>');
+  async signOut() { await flushSaves(); await sb.auth.signOut(); user = null; closeSheet(); renderAuth(); },
+
+  // scratch plays on this device
+  scratch() { loadPlay(newPlay('Scratch play')); },
+  openDraft(el) { const p = book.find(x => x.id === el.dataset.id); if (p) loadPlay(p); },
+  askDelDraft(el) { const p = book.find(x => x.id === el.dataset.id); if (p) confirmSheet('Delete this play?', '“' + esc(p.name) + '” will be removed from this device. This cannot be undone.', 'delDraft', 'Delete play', p.id); },
+  delDraft(el) { book = book.filter(x => x.id !== el.dataset.id); saveBook(); closeSheet(); goHome(); },
+  saveCopy() { where = { kind: 'draft' }; play.id = uuid(); save(); setEditorChrome(); history.replaceState(null, '', baseUrl()); toast('Saved as a scratch play on this device.'); },
+  addToPb() {
+    if (!user) { sheet(head('Add to playbook') + '<p class="note">Sign in to save this play to a playbook. It stays in your scratch plays on this device in the meantime.</p><div class="btns"><button type="button" class="btn primary" data-act="account">Sign in</button></div>'); return; }
+    save(); pickPlaybookSheet();
   },
-  del(el) {
-    const i = book.findIndex(x => x.id === el.dataset.id); if (i < 0) return;
-    book[i] = { id: book[i].id, deleted: true, updatedAt: Date.now() }; saveBook(); scheduleSync();
-    if (owned && play.id === el.dataset.id) loadPlay(livePlays()[0] || adopt(newPlay()));
-    bookSheet();
+  pickPb(el) { const pb = (view.pick || []).find(b => b.id === el.dataset.id); if (pb) addPlayTo(pb); },
+  newPbForPlay() { nameSheet('New playbook', '', 'newForPlay'); },
+
+  // playbooks
+  openPb(el) { const pb = (view.pbs || []).find(b => b.id === el.dataset.id); if (pb) openPb(pb); },
+  newPb() { nameSheet('New playbook', '', 'new'); },
+  renamePb() { nameSheet('Rename playbook', view.pb.name, 'rename'); },
+  askDelPb() { confirmSheet('Delete this playbook?', '“' + esc(view.pb.name) + '” and every play in it will be deleted for everyone. This cannot be undone.', 'delPb', 'Delete playbook'); },
+  async delPb() { const { error } = await sb.from('timeout_playbooks').delete().eq('id', view.pb.id); if (error) { toast('Could not delete the playbook.'); return; } delete kept.plays[view.pb.id]; closeSheet(); goHome(); },
+  askLeavePb() { confirmSheet('Leave this playbook?', 'You will lose access to “' + esc(view.pb.name) + '” until someone adds you again.', 'leavePb', 'Leave playbook'); },
+  async leavePb() { const { error } = await sb.from('timeout_playbook_members').delete().eq('playbook_id', view.pb.id).eq('user_id', user.id); if (error) { toast('Could not leave the playbook.'); return; } closeSheet(); goHome(); },
+  printPb() { if (!view.plays || !view.plays.length) { toast('There are no plays to print yet.'); return; } printPlays(view.plays); },
+  newCloudPlay() { loadPlay(newPlay(), { kind: 'cloud', pb: view.pb }); $('playName').select(); },
+  openCloud(el) { const p = (view.plays || []).find(x => x.id === el.dataset.id); if (p) loadPlay(clone(p), { kind: 'cloud', pb: view.pb }); },
+  async dupCloud(el) {
+    const p = (view.plays || []).find(x => x.id === el.dataset.id); if (!p) return;
+    const c = clone(p); c.id = uuid(); c.name = (p.name + ' copy').slice(0, 60); c.updatedAt = Date.now();
+    const { error } = await sb.from('timeout_plays').insert({ id: c.id, playbook_id: view.pb.id, data: c, rev: c.updatedAt });
+    if (error) toast('Could not copy the play.'); else openPb(view.pb);
   },
-  saveCopy() { owned = true; play.id = uuid(); save(); $('banner').hidden = true; history.replaceState(null, '', baseUrl()); toast('Saved to your playbook.'); },
-  printAll() { const list = livePlays(); if (!list.length) { toast('There are no plays to print yet.'); return; } printPlays(list); },
+  askDelCloud(el) { const p = (view.plays || []).find(x => x.id === el.dataset.id); if (p) confirmSheet('Delete this play?', '“' + esc(p.name) + '” will be removed from the playbook for everyone. This cannot be undone.', 'delCloud', 'Delete play', p.id); },
+  async delCloud(el) {
+    delete pendingSaves[el.dataset.id]; LS.set('timeout.pending', pendingSaves);
+    const { error } = await sb.from('timeout_plays').delete().eq('id', el.dataset.id);
+    closeSheet(); if (error) toast('Could not delete the play.'); else openPb(view.pb);
+  },
+
+  // people
+  people() { peopleSheet(); },
+  async rmPerson(el) { const { error } = await sb.from('timeout_playbook_members').delete().eq('playbook_id', view.pb.id).eq('user_id', el.dataset.id); peopleSheet(error ? { text: 'Could not remove that person.' } : { ok: true, text: 'Removed.' }); },
+  async rmInvite(el) { const { error } = await sb.from('timeout_invites').delete().eq('playbook_id', view.pb.id).eq('email', el.dataset.id); peopleSheet(error ? { text: 'Could not remove that invite.' } : { ok: true, text: 'Invite removed.' }); },
+
+  // sharing a single play
   shPdf() { printPlays([play]); },
   shImage() { composeImage(play).toBlob(b => { if (b) deliverSheet('Image ready', b, fileBase() + '.png', 'image'); else toast('The image could not be created.'); }, 'image/png'); },
   shVideo() { recordVideo(); },
@@ -478,12 +603,17 @@ const actions = {
   async copyLink() { const inp = $('linkOut'); try { await navigator.clipboard.writeText(inp.value); } catch { inp.select(); document.execCommand('copy'); } toast('Link copied.'); },
   sendLink() { navigator.share({ title: play.name, text: play.name + ' – basketball play', url: $('linkOut').value }).catch(() => {}); },
   sendFile() { if (pending) navigator.share({ files: [pending.file], title: play.name }).catch(() => {}); },
-  syncNow() { sync().then(() => { toast('Playbook synced.'); }); closeSheet(); },
-  async signOut() { await sb.auth.signOut(); user = null; closeSheet(); toast('Signed out. Your plays stay on this device.'); },
 };
 document.addEventListener('click', e => {
   if (e.target === $('scrim')) { closeSheet(); return; }
   const el = e.target.closest('[data-act]'); if (el && actions[el.dataset.act]) actions[el.dataset.act](el, e);
+});
+document.addEventListener('change', async e => {
+  const el = e.target.closest('[data-change]'); if (!el) return;
+  const q = el.dataset.change === 'role'
+    ? sb.from('timeout_playbook_members').update({ role: el.value }).eq('playbook_id', view.pb.id).eq('user_id', el.dataset.id)
+    : sb.from('timeout_invites').update({ role: el.value }).eq('playbook_id', view.pb.id).eq('email', el.dataset.id);
+  const { error } = await q; peopleSheet(error ? { text: 'Could not change that role.' } : { ok: true, text: 'Role updated.' });
 });
 document.addEventListener('submit', async e => {
   e.preventDefault();
@@ -495,10 +625,34 @@ document.addEventListener('submit', async e => {
   }
   if (kind === 'auth') {
     const mode = (e.submitter && e.submitter.dataset.mode) || 'in', email = $('authEmail').value.trim(), password = $('authPass').value;
-    const r = mode === 'up' ? await sb.auth.signUp({ email, password }) : await sb.auth.signInWithPassword({ email, password });
-    if (r.error) { accountSheet({ text: r.error.message }); return; }
-    if (mode === 'up' && !r.data.session) { accountSheet({ ok: true, text: 'Check your email for a confirmation link, then sign in here.' }); return; }
-    user = r.data.user; closeSheet(); toast('Signed in. Syncing your playbook…'); sync();
+    let r;
+    try { const c = await cloud(); r = mode === 'up' ? await c.auth.signUp({ email, password, options: { emailRedirectTo: baseUrl() } }) : await c.auth.signInWithPassword({ email, password }); }
+    catch { renderAuth({ text: 'Could not reach the sign-in service. Check your connection and try again.' }); return; }
+    if (r.error) { renderAuth({ text: r.error.message }); return; }
+    if (mode === 'up' && !r.data.session) { renderAuth({ ok: true, text: 'Check your email for a confirmation link, then sign in here.' }); return; }
+    user = r.data.user; afterSignIn();
+  }
+  if (kind === 'pb') {
+    const name = $('pbName').value.trim().slice(0, 60), mode = e.target.dataset.mode; if (!name) return;
+    if (mode === 'rename') {
+      const { error } = await sb.from('timeout_playbooks').update({ name }).eq('id', view.pb.id);
+      if (error) { toast('Could not rename the playbook.'); return; }
+      view.pb.name = name; closeSheet(); renderPb(view.pb, view.plays); return;
+    }
+    const { data, error } = await sb.from('timeout_playbooks').insert({ name }).select('id,name').single();
+    if (error || !data) { toast('Could not create the playbook. Check your connection and try again.'); return; }
+    const pb = { id: data.id, name: data.name, role: 'owner' };
+    if (mode === 'newForPlay') addPlayTo(pb); else { closeSheet(); openPb(pb); }
+  }
+  if (kind === 'person') {
+    const who = $('personWho').value.trim(), role = $('personRole').value;
+    const { data, error } = await sb.rpc('timeout_add_person', { pb: view.pb.id, who, new_role: role });
+    const text = error ? 'Could not add that person. Check your connection and try again.'
+      : data === 'added' ? 'Added as ' + ROLES[role][0] + '.'
+      : data === 'invited' ? 'No account uses that email yet. They will join as ' + ROLES[role][0] + ' when they create an account with it.'
+      : data === 'self' ? 'That person is you or the owner, so they already have access.'
+      : 'No profile has that username. Enter their email address to invite them instead.';
+    peopleSheet({ ok: !error && (data === 'added' || data === 'invited'), text });
   }
 });
 
@@ -510,20 +664,20 @@ $('defense').addEventListener('change', e => { st.defense = e.target.checked; re
 $('segView').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; play.court.view = b.dataset.view; press($('segView'), 'view', play.court.view); save(); layout(); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('scrim').hidden) closeSheet();
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); e.shiftKey ? doUndo(redo, undo) : doUndo(undo, redo); }
+  if (!$('app').hidden && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); e.shiftKey ? doUndo(redo, undo) : doUndo(undo, redo); }
 });
 window.addEventListener('hashchange', openFromHash);
-window.addEventListener('online', () => scheduleSync(500));
-document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleSync(500); });
+window.addEventListener('online', flushSaves);
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushSaves(); });
 
 /* ================= start ================= */
 $('app').dataset.side = settings.side;
 new ResizeObserver(layout).observe($('courtWrap'));
 (async function start() {
-  const last = LS.get('timeout.last', null);
-  loadPlay(book.find(p => !p.deleted && p.id === last) || livePlays()[0] || adopt(newPlay()));
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
-  await openFromHash();
-  if (cloudOn) cloud().then(() => { if (user) sync(); }).catch(() => {});
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if (/^#[ps]=/.test(location.hash) && await openFromHash()) { cloud().catch(() => {}); return; }
+  if (!cloudOn) { goHome(); return; }
+  try { await cloud(); } catch { /* offline with no saved copy of the sync library */ }
+  if (user) afterSignIn(); else if (LS.get('timeout.guest', 0)) goHome(); else renderAuth();
 })();
