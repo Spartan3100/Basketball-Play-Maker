@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Timeout – Basketball Play Designer</title>
+<meta name="description" content="Draw, animate, save and share basketball plays on a wood court.">
+<meta name="theme-color" content="#17202b">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app" data-side="bottom">
+  <header class="bar">
+    <span class="brand">Timeout</span>
+    <input id="playName" aria-label="Play name" autocomplete="off" maxlength="60">
+    <button type="button" class="btn" data-act="book">Playbook</button>
+    <button type="button" class="btn primary" data-act="share">Share</button>
+    <button type="button" class="btn icon" data-act="settings" aria-label="Settings" title="Settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-2.8 1.2V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-2.9-1.2l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00-1.2-2.8H3a2 2 0 110-4h.1a1.7 1.7 0 001.2-2.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 002.8-1.2V3a2 2 0 114 0v.1a1.7 1.7 0 002.9 1.2l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 001.2 2.8h.1a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1.1z"/></svg>
+    </button>
+  </header>
+  <div class="banner" id="banner" hidden>
+    <span>This play was shared with you.</span>
+    <button type="button" class="btn primary" data-act="saveCopy">Save to my playbook</button>
+  </div>
+  <div class="cbar">
+    <div class="seg" id="segView">
+      <button type="button" data-view="half">Half court</button>
+      <button type="button" data-view="full">Full court</button>
+    </div>
+    <select id="level" aria-label="Court lines">
+      <option value="hs">High school lines</option>
+      <option value="ncaa">College lines</option>
+      <option value="nba">NBA lines</option>
+      <option value="fiba">FIBA lines</option>
+    </select>
+    <select id="tag" aria-label="Folder">
+      <option>Offense</option><option>Defense</option><option>BLOB</option><option>SLOB</option><option>Press</option><option>Drill</option>
+    </select>
+    <label><input type="checkbox" id="defense" checked> Defense</label>
+  </div>
+  <div class="court" id="courtWrap"><canvas id="cv"></canvas></div>
+  <div class="steps">
+    <span class="lbl">Steps</span>
+    <span id="chips"></span>
+    <button type="button" class="chip add" data-act="addStep">+ Step</button>
+    <span class="sp"></span>
+    <button type="button" class="btn" id="delStep" data-act="delStep">Remove step</button>
+    <button type="button" class="btn primary" id="btnPlay" data-act="play">▶ Play</button>
+  </div>
+  <div class="noteRow"><input id="stepNote" placeholder="Coaching note for this step" autocomplete="off" maxlength="140" aria-label="Coaching note for this step"></div>
+  <nav class="tools" id="tools" aria-label="Drawing tools"></nav>
+</div>
+<div id="scrim" hidden></div>
+<div id="toast" hidden role="status"></div>
+<div id="print"></div>
+<script src="config.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
