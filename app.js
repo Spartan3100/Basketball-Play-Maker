@@ -276,6 +276,46 @@ function settingsSheet() {
     '<p class="note">To install Timeout as an app, open your browser menu and choose “Add to Home Screen” or “Install”.</p>');
 }
 
+// Starting spots for players 1-5 (x across the court, y up from the baseline, in feet). "ball" is who starts with it.
+const FORMATIONS = [
+  { group: 'Half-court sets', items: [
+    { k: '5out', name: '5 out', desc: 'All five outside the key', o: [[25, 34], [7, 26], [43, 26], [4, 7], [46, 7]] },
+    { k: '4out', name: '4 out, 1 in', desc: 'Four outside, one post player', o: [[17, 33], [33, 33], [5, 14], [45, 14], [31, 9]] },
+    { k: '3out', name: '3 out, 2 in', desc: 'Three outside, two in the key', o: [[25, 34], [6, 22], [44, 22], [19, 9], [31, 9]] },
+    { k: '2out', name: '2 out, 3 in', desc: 'Two guards out, a high post and two blocks', o: [[17, 33], [33, 33], [25, 20], [19, 9], [31, 9]] },
+    { k: 'horns', name: 'Horns', desc: 'Two at the elbows, two in the corners', o: [[25, 34], [4, 8], [46, 8], [17, 21], [33, 21]] },
+    { k: '14high', name: '1-4 high', desc: 'Four across the free-throw line', o: [[25, 36], [5, 20], [45, 20], [19, 20], [31, 20]] },
+    { k: 'box', name: 'Box', desc: 'Two at the elbows, two on the blocks', o: [[25, 34], [19, 9], [31, 9], [19, 20], [31, 20]] },
+  ] },
+  { group: 'Baseline inbounds (3 takes it out)', tag: 'BLOB', ball: 'o3', items: [
+    { k: 'blobBox', name: 'Baseline: box', desc: 'Two at the elbows, two on the blocks', o: [[19, 20], [31, 20], [34, -1.5], [19, 8], [31, 8]] },
+    { k: 'blobStack', name: 'Baseline: stack', desc: 'Four in a line up the lane', o: [[32, 21], [32, 16.5], [34, -1.5], [32, 12], [32, 7.5]] },
+    { k: 'blobLine', name: 'Baseline: line', desc: 'Four across the free-throw line', o: [[8, 19], [42, 19], [34, -1.5], [19, 19], [31, 19]] },
+  ] },
+  { group: 'Sideline inbounds (3 takes it out)', tag: 'SLOB', ball: 'o3', items: [
+    { k: 'slobBox', name: 'Sideline: box', desc: 'Two up top, two at the elbows', o: [[20, 32], [32, 32], [50.6, 30], [19, 19], [31, 19]] },
+    { k: 'slobStack', name: 'Sideline: stack', desc: 'Four in a line facing the inbounder', o: [[40, 30], [34, 30], [50.6, 30], [28, 30], [22, 30]] },
+    { k: 'slobLine', name: 'Sideline: line', desc: 'Four across the free-throw line', o: [[8, 19], [42, 19], [50.6, 30], [19, 19], [31, 19]] },
+  ] },
+];
+function formationSheet() {
+  sheet(head('Formation') + '<p class="note">Sets where the players start on this step. Lines already drawn on this step are cleared. Undo brings them back.</p>' +
+    FORMATIONS.map(g => '<h3>' + g.group + '</h3>' + g.items.map(f => '<button type="button" class="row" data-act="setFormation" data-k="' + f.k + '"><span class="main"><b>' + f.name + '</b><span>' + f.desc + '</span></span></button>').join('')).join(''));
+}
+function applyFormation(key) {
+  const g = FORMATIONS.find(x => x.items.some(f => f.k === key)); if (!g) return;
+  const f = g.items.find(x => x.k === key), hoop = HOOPS[0], pos = {};
+  f.o.forEach((p, i) => {
+    pos['o' + (i + 1)] = P(p[0], p[1]);
+    // each defender starts between their player and the basket
+    const dx = hoop.x - p[0], dy = hoop.y - p[1], d = Math.hypot(dx, dy) || 1, k = Math.min(3.5, d * .6) / d;
+    pos['x' + (i + 1)] = P(p[0] + dx * k, p[1] + dy * k);
+  });
+  edit(s => { s.pos = pos; s.lines = []; s.ball = g.ball || 'o1'; s.ballPos = null; });
+  if (g.tag && play.tag === 'Offense') { play.tag = g.tag; $('tag').value = g.tag; save(); }
+  closeSheet(); toast(f.name + ' set. Drag any player to adjust.');
+}
+
 function shareSheet() {
   sheet(head('Share this play') +
     '<button type="button" class="row" data-act="shLink"><span class="main"><b>Link</b><span>Opens the animated play in any browser. No account needed to view.</span></span></button>' +
@@ -525,7 +565,8 @@ async function pickPlaybookSheet() {
 
 /* ================= actions ================= */
 const actions = {
-  close: closeSheet, share: shareSheet, settings: settingsSheet,
+  close: closeSheet, share: shareSheet, settings: settingsSheet, formation: formationSheet,
+  setFormation(el) { applyFormation(el.dataset.k); },
   play() { if (anim) { stopAnim(); render(); } else playAnim(); },
   addStep() {
     stopAnim(); st.showEnd = false; undo.push(JSON.stringify(play.steps)); redo = [];
