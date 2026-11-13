@@ -1,6 +1,8 @@
 import { LEVELS, WOODS, PAINTS, HOOPS, W, L, P, dist, makeGeo, S, inv, paintCourt, drawScene, stateAt, endOf, plen, lineDist } from './court.js';
 
 const CFG = window.TIMEOUT_CONFIG || {};
+// App version: MAJOR.MINOR.PATCH. Major = big changes, minor = smaller features and changes, patch = bug fixes. See CHANGELOG.md.
+const APP_VERSION = '1.3.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -466,6 +468,19 @@ async function fetchPlays(pbId) {
   kept.plays[pbId] = list; LS.set('timeout.cache', kept); return list;
 }
 
+/* ================= install to home screen ================= */
+// The install button shows on the home screen only while the app is not installed.
+// Chrome, Edge and Android fire beforeinstallprompt only when the app is not installed, and fire it again after it is removed.
+// iPhone and iPad have no install prompt, so the button opens Add to Home Screen steps instead.
+let installEvt = null;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const canInstall = () => !isStandalone() && (!!installEvt || isIOS());
+function syncInstall() { document.querySelectorAll('[data-act="install"]').forEach(b => { b.hidden = !canInstall(); }); }
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; syncInstall(); });
+window.addEventListener('appinstalled', () => { installEvt = null; syncInstall(); toast('Timeout is installed. Open it from your home screen.'); });
+matchMedia('(display-mode: standalone)').addEventListener?.('change', syncInstall);
+
 /* ================= screens: sign in, home, playbook ================= */
 let view = { name: 'auth' };
 function showScreen(html) { stopAnim(); $('app').hidden = true; const s = $('screen'); s.innerHTML = html; s.hidden = false; }
@@ -493,7 +508,8 @@ function renderHome(pbs, loading) {
   else books = '<h3>Playbooks</h3>' + (pbs.length ? pbs.map(b => '<div class="row"><button type="button" class="main" data-act="openPb" data-id="' + b.id + '"><b>' + esc(b.name) + '</b><span>' + ROLES[b.role][1] + '</span></button><span class="pill">' + ROLES[b.role][0] + '</span></div>').join('')
     : '<p class="note">' + (loading ? 'Loading your playbooks…' : 'You have no playbooks yet. Create one to save plays and add people.') + '</p>') +
     '<div class="btns"><button type="button" class="btn" data-act="newPb">New playbook</button></div>';
-  showScreen('<header class="bar"><span class="brand">Timeout</span><span class="sp"></span>' + (cloudOn ? '<button type="button" class="btn" data-act="account">' + (user ? 'Account' : 'Sign in') + '</button>' : '') + GEAR + '</header><div class="wrap">' +
+  showScreen('<header class="bar"><span class="brand">Timeout</span><span class="ver" title="App version">v' + APP_VERSION + '</span><span class="sp"></span>' +
+    '<button type="button" class="btn primary" data-act="install"' + (canInstall() ? '' : ' hidden') + '>Install app</button>' + (cloudOn ? '<button type="button" class="btn" data-act="account">' + (user ? 'Account' : 'Sign in') + '</button>' : '') + GEAR + '</header><div class="wrap">' +
     '<button type="button" class="card big" data-act="scratch"><b>Scratchboard</b><span>Open a blank court and start drawing.</span></button>' + books +
     (drafts.length ? '<h3>Scratch plays on this device</h3>' + drafts.map(p => playRow(p, 'openDraft', '<button type="button" class="btn danger" data-act="askDelDraft" data-id="' + p.id + '">Delete</button>')).join('') : '') + '</div>');
 }
@@ -582,6 +598,16 @@ const actions = {
   home() { closeSheet(); goHome(); },
   back() { closeSheet(); if (where.kind === 'shared') history.replaceState(null, '', baseUrl()); if (where.kind === 'cloud') openPb(where.pb); else goHome(); },
   guest() { LS.set('timeout.guest', 1); goHome(); },
+  async install() {
+    if (installEvt) {
+      const e = installEvt; e.prompt();
+      try { const r = await e.userChoice; if (r.outcome === 'accepted') installEvt = null; } catch { /* prompt closed */ }
+      syncInstall(); return;
+    }
+    if (isIOS()) sheet(head('Install Timeout') + '<p class="note">To add Timeout to your home screen:</p><ol class="steps-list">' +
+      '<li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button (the square with an arrow pointing up).</li>' +
+      '<li>Choose <b>Add to Home Screen</b>, then tap <b>Add</b>.</li></ol><p class="note">Open Timeout from the new icon and this button will no longer show.</p>');
+  },
   account() {
     closeSheet();
     if (!user) { renderAuth(); return; }
