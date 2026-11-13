@@ -83,6 +83,8 @@ button{cursor:pointer}
 .field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
 .field input{color:var(--ink);font-size:16px;padding:9px 10px}
 .btns{display:flex;gap:8px;flex-wrap:wrap}
+#update{position:fixed;left:50%;top:calc(60px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:25;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:center;background:var(--ink);color:var(--panel);padding:8px 10px 8px 14px;border-radius:10px;font-size:14px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.25);width:max-content;max-width:calc(100% - 32px)}
+#update .btn:not(.primary){background:transparent;color:inherit;border-color:rgba(255,255,255,.35)}
 #toast{position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--panel);padding:9px 14px;border-radius:8px;font-size:14px;z-index:30;max-width:88%;text-align:center}
 
 .bar{flex-wrap:wrap}
@@ -108,7 +110,7 @@ button.card.big span{color:var(--muted)}
 .field select{color:var(--ink)}
 #print{display:none}
 @media print{
-  #app,#screen,#scrim,#toast{display:none!important}
+  #app,#screen,#scrim,#toast,#update{display:none!important}
   html,body{height:auto;background:#fff;color:#000}
   #print{display:block;font-family:var(--body)}
   #print section{break-after:page;padding:0}

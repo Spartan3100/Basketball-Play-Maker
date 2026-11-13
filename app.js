@@ -1,8 +1,8 @@
 import { LEVELS, WOODS, PAINTS, HOOPS, W, L, P, dist, makeGeo, S, inv, paintCourt, drawScene, stateAt, endOf, plen, lineDist } from './court.js';
 
 const CFG = window.TIMEOUT_CONFIG || {};
-// App version: MAJOR.MINOR.PATCH. Major = big changes, minor = smaller features and changes, patch = bug fixes. See CHANGELOG.md.
-const APP_VERSION = '1.3.0';
+// App version: MAJOR.MINOR.PATCH, set in version.js. See CHANGELOG.md.
+const APP_VERSION = self.APP_VERSION || '';
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -481,6 +481,39 @@ window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); instal
 window.addEventListener('appinstalled', () => { installEvt = null; syncInstall(); toast('Timeout is installed. Open it from your home screen.'); });
 matchMedia('(display-mode: standalone)').addEventListener?.('change', syncInstall);
 
+/* ================= updates ================= */
+// Every 15 seconds, while the app is open, on screen and online, ask the browser to check sw.js (and version.js) for a change.
+// That is one small request; nothing else is downloaded unless there is a new version. A new version installs
+// in the background next to the running one, then a bar offers it. Update hands over to it and reloads straight away.
+let swReg = null, updating = false, dismissed = null;
+function askVersion(w) {
+  return new Promise(res => {
+    const ch = new MessageChannel(), t = setTimeout(() => res(''), 1500);
+    ch.port1.onmessage = e => { clearTimeout(t); res(e.data || ''); };
+    try { w.postMessage('version', [ch.port2]); } catch { clearTimeout(t); res(''); }
+  });
+}
+async function offerUpdate(w, again) {
+  if (!w || updating || !navigator.serviceWorker.controller || (w === dismissed && !again)) return;
+  const v = await askVersion(w);
+  if (updating || swReg.waiting !== w) return;
+  $('updText').textContent = v && v !== APP_VERSION ? 'Version ' + v + ' is available.' : 'An update is available.';
+  $('update').hidden = false;
+}
+function checkForUpdate() { if (swReg && !updating && !document.hidden && navigator.onLine && !swReg.installing) swReg.update().catch(() => { /* offline or server busy; try next time */ }); }
+function watchUpdates(reg) {
+  swReg = reg;
+  if (reg.waiting) offerUpdate(reg.waiting);
+  reg.addEventListener('updatefound', () => {
+    const w = reg.installing; if (!w) return;
+    w.addEventListener('statechange', () => { if (w.state === 'installed') offerUpdate(w); });
+  });
+  setInterval(checkForUpdate, 15000);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) return; if (reg.waiting) offerUpdate(reg.waiting, true); checkForUpdate(); });
+  // Another open tab or window pressed Update: this page is now behind, so offer a reload.
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (updating) return; $('updText').textContent = 'Timeout was updated in another window.'; $('update').hidden = false; });
+}
+
 /* ================= screens: sign in, home, playbook ================= */
 let view = { name: 'auth' };
 function showScreen(html) { stopAnim(); $('app').hidden = true; const s = $('screen'); s.innerHTML = html; s.hidden = false; }
@@ -598,6 +631,18 @@ const actions = {
   home() { closeSheet(); goHome(); },
   back() { closeSheet(); if (where.kind === 'shared') history.replaceState(null, '', baseUrl()); if (where.kind === 'cloud') openPb(where.pb); else goHome(); },
   guest() { LS.set('timeout.guest', 1); goHome(); },
+  laterUpdate() { dismissed = swReg && swReg.waiting; $('update').hidden = true; },
+  async applyUpdate() {
+    if (updating) return;
+    const w = swReg && swReg.waiting;
+    updating = true; $('updBtn').disabled = true; $('updBtn').textContent = 'Updating…';
+    if (play && !$('app').hidden) save();
+    await Promise.race([flushSaves().catch(() => {}), wait(1500)]); // plays are already on the device; this only tries to send playbook edits first
+    if (!w) { location.reload(); return; }
+    navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
+    w.postMessage('skipWaiting');
+    setTimeout(() => location.reload(), 3000); // in case the browser never reports the hand-over
+  },
   async install() {
     if (installEvt) {
       const e = installEvt; e.prompt();
@@ -742,7 +787,7 @@ $('app').dataset.side = settings.side;
 new ResizeObserver(layout).observe($('courtWrap'));
 (async function start() {
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
-  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(watchUpdates).catch(() => {});
   if (/^#[ps]=/.test(location.hash) && await openFromHash()) { cloud().catch(() => {}); return; }
   if (!cloudOn) { goHome(); return; }
   try { await cloud(); } catch { /* offline with no saved copy of the sync library */ }

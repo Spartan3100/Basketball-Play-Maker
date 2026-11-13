@@ -31,5 +31,6 @@ Signed-in users create playbooks and add people by username or email. Roles: Own
 - `index.html`, `styles.css`, `app.js` – the app
 - `court.js` – court drawing and play rendering
 - `sw.js`, `manifest.webmanifest`, `icons/` – install and offline support
+- `version.js` – the app version; change it with every release so installed copies are offered the update
 - `CHANGELOG.md` – version history and numbering rules
 - `vendor/supabase.js` – Supabase client (v2.119.0), loaded only when sync is configured

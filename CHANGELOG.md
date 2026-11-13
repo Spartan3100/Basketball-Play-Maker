@@ -6,7 +6,12 @@ Versions follow MAJOR.MINOR.PATCH:
 - **Minor** (second number): smaller updates and new features.
 - **Patch** (third number): bug fixes and patches.
 
-The current version shows in the top-left corner of the home screen. It is set by `APP_VERSION` in `app.js`; when it changes, also change `CACHE` in `sw.js` so installed copies pick up the update.
+The current version shows in the top-left corner of the home screen. It is set in one place, `version.js`.
+Change that number with every release: it is what tells open and installed copies that an update is ready. A release that changes other files but not `version.js` will not be offered as an update.
+
+## 1.4.0
+- Update prompt: while the app is open it checks for a new version every 15 seconds (only when on screen and online) and shows a bar with Update and Later. Update applies the new version and reloads straight away; Later hides the bar until the app is next opened.
+- The version number now lives in `version.js`.
 
 ## 1.3.0
 - Install app button on the home screen. It hides once the app is installed and comes back if the app is removed from the device (Chrome, Edge, Android). On iPhone and iPad it shows Add to Home Screen steps.
